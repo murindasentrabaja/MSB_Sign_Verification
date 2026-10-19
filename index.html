@@ -135,7 +135,7 @@ async function verifyView(id) {
     <div class="band"><div class="seal">${ok ? '✓' : '✕'}</div><div><h2>${ok ? 'Tanda tangan valid' : 'Tanda tangan dicabut'}</h2><p>${ok ? 'Tercatat resmi di sistem ' + esc(CONFIG.COMPANY) : 'Tanda tangan ini tidak berlaku lagi'}</p></div></div>
     <div class="vb"><div class="who">${p.foto ? `<img class="avatar" src="${esc(p.foto)}" alt="">` : `<div class="avatar">${esc(initials(p.nama))}</div>`}
       <div><h1>${esc(p.nama)}</h1><div>${esc(p.jabatan)}</div><div class="muted">${esc(p.departemen || '')}</div></div></div>
-      <dl><dt>ID personil</dt><dd>${esc(p.id)}</dd><dt>Dokumen</dt><dd>${esc(d.judul)}</dd><dt>Nomor dokumen</dt><dd>${esc(d.nodok || '-')}</dd><dt>Ditandatangani</dt><dd>${fmtDate(d.tanggal)}</dd><dt>Kode</dt><dd class="mono">${esc(d.token)}</dd></dl>
+      <dl><dt>ID personil</dt><dd>${esc(p.id)}</dd>${d.judul ? `<dt>Dokumen</dt><dd>${esc(d.judul)}</dd>` : ''}${d.nodok ? `<dt>Nomor dokumen</dt><dd>${esc(d.nodok)}</dd>` : ''}<dt>Ditandatangani</dt><dd>${fmtDate(d.tanggal)}</dd><dt>Kode</dt><dd class="mono">${esc(d.token)}</dd></dl>
       <div class="slip"><img src="${esc(d.gambar)}" alt="Tanda tangan ${esc(p.nama)}"></div><p class="sigl">Tanda tangan ${esc(p.nama)}</p>
       <div class="hash mono">SHA-256 ${esc(d.hash)}</div><p class="sigl">Halaman ini sudah dibuka ${d.scan} kali.</p>
       <div class="acts"><button data-act="share" data-id="${esc(d.token)}">Bagikan</button><button class="ghost" data-act="qr" data-id="${esc(d.token)}">Tampilkan QR</button><button class="ghost" data-act="print">Cetak</button></div></div></section>`;
@@ -172,20 +172,18 @@ function initPad() {
   $('#clr').onclick = () => { x.clearRect(0, 0, c.width, c.height); pad.drawn = false; };
 }
 function paneBuat() {
-  const act = S.personil.filter(p => p.Status === 'Aktif');
-  $('#pane').innerHTML = `<section class="card"><h2>Terbitkan tanda tangan digital</h2>
-    <p class="muted">Pilih personil, isi dokumen, lalu goreskan tanda tangan. QR akan mengarah langsung ke profil personil tersebut.</p>
+  const act = S.personil.filter(p => p.Status === 'Aktif' && p.hasTtd);
+  $('#pane').innerHTML = `<section class="card"><h2>Terbitkan tanda tangan</h2>
+    <p class="muted">Tanda tangan personil sudah tersimpan dan bisa dipakai berulang untuk dokumen apa pun. Setiap penerbitan mendapat QR sendiri, dengan waktu penandatanganan yang dicatat otomatis.</p>
     <form id="tf"><div class="grid"><div><label for="pid">Personil penandatangan</label><select id="pid" required><option value="">Pilih personil</option>${act.map(p => `<option value="${esc(p.ID)}">${esc(p.Nama)} (${esc(p.Jabatan)})</option>`).join('')}</select></div>
-    <div><label for="nodok">Nomor dokumen</label><input id="nodok" placeholder="mis. 012/MSB/X/2026"></div></div>
-    <label for="judul">Judul dokumen</label><input id="judul" required>
-    <label>Tanda tangan</label><canvas id="pad" width="360" height="140" aria-label="Area tanda tangan"></canvas>
-    <div class="row" style="margin-top:14px;justify-content:flex-start"><button type="button" class="ghost" id="clr">Hapus goresan</button><button>Terbitkan dan buat QR</button></div></form></section>`;
-  initPad();
+    <div><label for="nodok">Nomor dokumen (opsional)</label><input id="nodok" placeholder="mis. 012/MSB/X/2026"></div></div>
+    <label for="judul">Judul dokumen (opsional)</label><input id="judul">
+    ${act.length ? '' : '<p class="muted">Belum ada personil aktif yang punya tanda tangan. Tambahkan di tab Personil.</p>'}
+    <button style="margin-top:16px">Terbitkan dan buat QR</button></form></section>`;
   $('#tf').onsubmit = async e => {
     e.preventDefault();
-    if (!pad.drawn) return toast('Tanda tangan masih kosong');
     const b = e.submitter || {}; b.disabled = true;
-    const r = await post({action: 'createTtd', personilId: $('#pid').value, nodok: $('#nodok').value.trim(), judul: $('#judul').value.trim(), gambar: $('#pad').toDataURL('image/png')});
+    const r = await post({action: 'createTtd', personilId: $('#pid').value, nodok: $('#nodok').value.trim(), judul: $('#judul').value.trim()});
     b.disabled = false;
     if (!r.ok) return toast(r.error);
     await refresh(); paneBuat(); showQR(r.token);
@@ -196,20 +194,25 @@ function panePersonil() {
   $('#pane').innerHTML = `<section class="card"><h2 id="pt">Tambah personil</h2><form id="pf"><div class="grid">
     <div><label for="nama">Nama lengkap</label><input id="nama" required></div><div><label for="jab">Jabatan</label><input id="jab" required></div>
     <div><label for="dep">Departemen</label><input id="dep"></div><div><label for="foto">URL foto (opsional)</label><input id="foto" type="url"></div></div>
-    <button style="margin-top:16px">Simpan personil</button></form></section>
-    <section class="card tw"><table><tr><th>Nama</th><th>Jabatan</th><th>Departemen</th><th>Status</th><th></th></tr>
+    <label>Tanda tangan (cukup digoreskan sekali)</label><canvas id="pad" width="360" height="140" aria-label="Area tanda tangan"></canvas>
+    <p class="sigl">Saat mengubah personil, biarkan kosong jika tanda tangan tidak diganti.</p>
+    <div class="row" style="margin-top:14px;justify-content:flex-start"><button type="button" class="ghost" id="clr">Hapus goresan</button><button>Simpan personil</button></div></form></section>
+    <section class="card tw"><table><tr><th>Nama</th><th>Jabatan</th><th>Departemen</th><th>Tanda tangan</th><th>Status</th><th></th></tr>
     ${S.personil.map(p => `<tr><td><b>${esc(p.Nama)}</b><br><small class="muted">${esc(p.ID)}</small></td><td>${esc(p.Jabatan)}</td><td>${esc(p.Departemen)}</td>
+    <td><span class="pill ${p.hasTtd ? '' : 'bad'}">${p.hasTtd ? 'Tersimpan' : 'Belum ada'}</span></td>
     <td><span class="pill ${p.Status === 'Aktif' ? '' : 'bad'}">${esc(p.Status)}</span></td>
-    <td><button class="sm ghost" data-act="edit" data-id="${esc(p.ID)}">Ubah</button> <button class="sm ghost" data-act="tog" data-id="${esc(p.ID)}">${p.Status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada personil. Tambahkan yang pertama di atas.</td></tr>'}</table></section>`;
+    <td>${p.hasTtd && p.Status === 'Aktif' ? `<button class="sm" data-act="sign" data-id="${esc(p.ID)}">Terbitkan QR</button> ` : ''}<button class="sm ghost" data-act="edit" data-id="${esc(p.ID)}">Ubah</button> <button class="sm ghost" data-act="tog" data-id="${esc(p.ID)}">${p.Status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada personil. Tambahkan yang pertama di atas.</td></tr>'}</table></section>`;
+  initPad();
   $('#pf').onsubmit = async e => {
     e.preventDefault();
-    done(await post({action: 'savePersonil', id: editing ? editing.ID : '', nama: $('#nama').value.trim(), jabatan: $('#jab').value.trim(), departemen: $('#dep').value.trim(), foto: $('#foto').value.trim(), status: editing ? editing.Status : 'Aktif'}));
+    if (!editing && !pad.drawn) return toast('Goreskan tanda tangan dulu');
+    done(await post({action: 'savePersonil', id: editing ? editing.ID : '', nama: $('#nama').value.trim(), jabatan: $('#jab').value.trim(), departemen: $('#dep').value.trim(), foto: $('#foto').value.trim(), status: editing ? editing.Status : 'Aktif', gambar: pad.drawn ? $('#pad').toDataURL('image/png') : ''}));
   };
 }
 function paneRiwayat() {
   const nm = id => (S.personil.find(p => p.ID === id) || {}).Nama || id;
   $('#pane').innerHTML = `<section class="card tw"><h2>Riwayat tanda tangan</h2><table><tr><th>Kode</th><th>Penandatangan</th><th>Dokumen</th><th>Waktu</th><th>Dibuka</th><th>Status</th><th></th></tr>
-    ${[...S.ttd].reverse().map(t => `<tr><td class="mono"><small>${esc(t.Token)}</small></td><td>${esc(nm(t.PersonilID))}</td><td>${esc(t.JudulDokumen)}<br><small class="muted">${esc(t.NoDokumen)}</small></td><td>${fmtDate(t.TanggalTTD)}</td><td>${t.JumlahScan || 0}×</td>
+    ${[...S.ttd].reverse().map(t => `<tr><td class="mono"><small>${esc(t.Token)}</small></td><td>${esc(nm(t.PersonilID))}</td><td>${esc(t.JudulDokumen || 'Tanpa keterangan dokumen')}<br><small class="muted">${esc(t.NoDokumen)}</small></td><td>${fmtDate(t.TanggalTTD)}</td><td>${t.JumlahScan || 0}×</td>
     <td><span class="pill ${t.Status === 'Valid' ? '' : 'bad'}">${esc(t.Status)}</span></td>
     <td><button class="sm ghost" data-act="qr" data-id="${esc(t.Token)}">Lihat QR</button> <button class="sm ghost" data-act="stat" data-id="${esc(t.Token)}">${t.Status === 'Valid' ? 'Cabut' : 'Aktifkan'}</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Belum ada tanda tangan yang diterbitkan.</td></tr>'}</table></section>`;
 }
@@ -240,6 +243,7 @@ app.addEventListener('click', async e => {
   if (act === 'qr') return showQR(id);
   if (act === 'print') return print();
   if (act === 'share') { const u = linkOf(id); return navigator.share ? navigator.share({title: 'Verifikasi tanda tangan digital', url: u}).catch(() => {}) : navigator.clipboard.writeText(u).then(() => toast('Link disalin')); }
+  if (act === 'sign') { const r = await post({action: 'createTtd', personilId: id}); if (!r.ok) return toast(r.error); await refresh(); return showQR(r.token); }
   if (act === 'edit') {
     const p = S.personil.find(x => x.ID === id); editing = p;
     $('#nama').value = p.Nama; $('#jab').value = p.Jabatan; $('#dep').value = p.Departemen; $('#foto').value = p.FotoURL;
